@@ -15,6 +15,11 @@ from Core.bend_transform import BendTransform
 from Physics.collision_detector import CollisionDetector
 from Physics.machine_kinematics import PressBrakeMachine
 
+try:
+    import FreeCAD
+    HAS_FREECAD = True
+except ImportError:
+    HAS_FREECAD = False
 
 class ValidationResult:
     """Encapsulates the result of a physical step validation query."""
@@ -92,21 +97,29 @@ class PhysicalValidator:
         # Stage 4: Layer 1 Self Collision Check
         self_coll, self_msg = self.detector.self_collision(unfolded_shape)
         if self_coll:
+            if HAS_FREECAD:
+                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=self: {self_msg}\n")
             return ValidationResult(valid=False, reason=self_msg, stage="self")
 
         # Stage 5: Layer 2 Tool Collision Check
         tool_coll, tool_msg = self.detector.tool_collision(unfolded_shape, bend_info)
         if tool_coll:
+            if HAS_FREECAD:
+                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=tool: {tool_msg}\n")
             return ValidationResult(valid=False, reason=tool_msg, stage="tool")
 
         # Stage 6: Layer 3 Machine Collision Check
         mach_coll, mach_msg = self.detector.machine_collision(unfolded_shape, bend_info)
         if mach_coll:
+            if HAS_FREECAD:
+                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=machine: {mach_msg}\n")
             return ValidationResult(valid=False, reason=mach_msg, stage="machine")
 
         # Stage 7: Layer 4 Trajectory Sweep Collision Check (Δθ = 5.0°)
         traj_coll, traj_msg = self.detector.trajectory_collision(current_state.shape, bend_info, dtheta=5.0)
         if traj_coll:
+            if HAS_FREECAD:
+                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=trajectory: {traj_msg}\n")
             return ValidationResult(valid=False, reason=traj_msg, stage="trajectory")
 
         # Step is VALID -> Produce next FoldState

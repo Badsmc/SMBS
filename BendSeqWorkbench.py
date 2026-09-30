@@ -12,60 +12,37 @@ try:
 except ImportError:
     HAS_FREECAD_GUI = False
 
-# Ensure module path is accessible
-MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+def get_module_dir():
+    if '__file__' in globals() and __file__:
+        return os.path.dirname(os.path.abspath(__file__))
+    try:
+        if 'FreeCAD' in sys.modules:
+            app_data = FreeCAD.getUserAppDataDir()
+            smbs_path = os.path.join(app_data, "Mod", "SMBS")
+            if os.path.exists(smbs_path):
+                return smbs_path
+            bendseq_path = os.path.join(app_data, "Mod", "BendSeq")
+            if os.path.exists(bendseq_path):
+                return bendseq_path
+    except Exception:
+        pass
+    return os.getcwd()
+
+def get_icon_path(filename):
+    path = os.path.join(get_module_dir(), "Icons", filename)
+    return path if os.path.exists(path) else ""
+
+MODULE_DIR = get_module_dir()
 if MODULE_DIR not in sys.path:
     sys.path.insert(0, MODULE_DIR)
 
 if HAS_FREECAD_GUI:
-    XPM_PLANNER = """/* XPM */
-static char * xpm_planner[] = {
-"16 16 3 1",
-" 	c None",
-".	c #0088FF",
-"+	c #004488",
-"                ",
-"  ............  ",
-"  .++++++++++.  ",
-"  .++......++.  ",
-"  .++.    .++.  ",
-"  .++.    .++.  ",
-"  .++.    .++.  ",
-"  .++.    .++.  ",
-"  .++.    .++.  ",
-"  .++.    .++.  ",
-"  .++++++++++.  ",
-"  ............  ",
-"                ",
-"                "};"""
-
-    XPM_KINEMATICS = """/* XPM */
-static char * xpm_kinematics[] = {
-"16 16 3 1",
-" 	c None",
-".	c #FF8800",
-"+	c #884400",
-"                ",
-"  ............  ",
-"  .++++++++++.  ",
-"  .++++++++++.  ",
-"  .++......++.  ",
-"  .++.    .++.  ",
-"  .++.    .++.  ",
-"  .++.    .++.  ",
-"  .++++++++++.  ",
-"  .++++++++++.  ",
-"  ............  ",
-"                ",
-"                ",
-"                "};"""
-
     class CommandRunPlanner:
         """FreeCAD GUI Command: Run BendSeq Backward Planner on active object."""
 
         def GetResources(self):
             return {
-                'Pixmap': XPM_PLANNER,
+                'Pixmap': get_icon_path("planner.svg"),
                 'MenuText': 'Run Backward Planner',
                 'ToolTip': 'Executes backward search (bent -> flat) to find collision-free bend sequence'
             }
@@ -104,7 +81,7 @@ static char * xpm_kinematics[] = {
 
         def GetResources(self):
             return {
-                'Pixmap': XPM_KINEMATICS,
+                'Pixmap': get_icon_path("kinematics.svg"),
                 'MenuText': 'Show Machine Kinematics',
                 'ToolTip': 'Display punch, die, and backgauge tooling in 3D View'
             }

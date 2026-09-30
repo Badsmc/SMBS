@@ -85,6 +85,12 @@ class BendSeqOrchestrator:
         bends_map = features["bends"]
         k_factor = features.get("k_factor", 0.40)
         thickness = features.get("thickness", 2.0)
+        
+        try:
+            import FreeCAD
+            FreeCAD.Console.PrintMessage(f"BendSeq: extracted {len(bends_map)} bends, thickness={thickness}\n")
+        except Exception:
+            pass
 
         # Step 2: Build canonical BendGraph, PanelGraph & initial FoldState
         from Physics.validator import PhysicalValidator
