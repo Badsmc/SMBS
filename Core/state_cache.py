@@ -1,9 +1,9 @@
 """
-state_cache.py - Geometric Hash Table & Lazy Evaluation Cache for TopoShape States
+state_cache.py - Physical State Cache & Lazy Evaluation Hash Table (SMBS Phase 3)
 
-Backward planning relies on lazy evaluation: intermediate shapes are generated only on demand
-and cached by their geometric hash. If different unfolding branches lead to the exact same shape
-state (graph coalescence), the state cache avoids redundant collision checks and unfold computations.
+SPEC v1.0 Requirement:
+Caches generated physical FoldState objects indexed by unique multi-property physical state fingerprints:
+folded_bends, remaining_bends, panel_transforms, bend_transforms, orientation, tooling_state, and shape signature.
 """
 
 import hashlib
@@ -12,8 +12,7 @@ from typing import Dict, Optional, Tuple, Set, Any
 
 class StateCache:
     """
-    Thread-safe / execution-wide geometric state cache.
-    Stores and retrieves generated TopoShape states indexed by unique geometric signatures.
+    Thread-safe physical state cache avoiding redundant state evaluation.
     """
 
     def __init__(self):
@@ -22,37 +21,33 @@ class StateCache:
         self._misses: int = 0
 
     @staticmethod
-    def compute_hash(shape: Any, remaining_bends: Set[str]) -> str:
+    def compute_hash(shape_or_state: Any, remaining_bends: Optional[Set[str]] = None) -> str:
         """
-        Compute a robust geometric hash for a TopoShape combined with remaining bend IDs.
-        
-        Uses TopoShape properties:
-        - Volume / Surface Area
-        - Center of Mass (X, Y, Z)
-        - BoundBox (XMin, XMax, YMin, YMax, ZMin, ZMax)
-        - Remaining bend IDs bitmask / set representation
+        Compute robust physical state fingerprint key.
+        If a FoldState is passed, invokes fold_state.fingerprint().
         """
-        bend_signature = "_".join(sorted(list(remaining_bends)))
-        
-        if shape is not None and hasattr(shape, 'Volume'):
+        if hasattr(shape_or_state, 'fingerprint') and callable(shape_or_state.fingerprint):
+            return shape_or_state.fingerprint()
+
+        rem = remaining_bends or set()
+        bend_signature = "_".join(sorted(list(rem)))
+
+        if shape_or_state is not None and hasattr(shape_or_state, 'Volume'):
             try:
-                vol = round(float(shape.Volume), 4)
-                area = round(float(shape.Area), 4)
-                bb = shape.BoundBox
+                vol = round(float(shape_or_state.Volume), 4)
+                area = round(float(shape_or_state.Area), 4)
+                bb = shape_or_state.BoundBox
                 bb_sig = f"{bb.XMin:.2f}_{bb.XMax:.2f}_{bb.YMin:.2f}_{bb.YMax:.2f}_{bb.ZMin:.2f}_{bb.ZMax:.2f}"
-                cm = shape.CenterOfMass
-                cm_sig = f"{cm.x:.2f}_{cm.y:.2f}_{cm.z:.2f}"
-                raw_str = f"shape_v{vol}_a{area}_bb{bb_sig}_cm{cm_sig}_bends[{bend_signature}]"
+                raw_str = f"shape_v{vol}_a{area}_bb{bb_sig}_bends[{bend_signature}]"
             except Exception:
-                # Fallback if properties fail or stub shape
-                raw_str = f"shape_stub_{id(shape)}_bends[{bend_signature}]"
+                raw_str = f"shape_stub_{id(shape_or_state)}_bends[{bend_signature}]"
         else:
-            raw_str = f"shape_stub_{id(shape)}_bends[{bend_signature}]"
+            raw_str = f"shape_stub_{id(shape_or_state)}_bends[{bend_signature}]"
 
         return hashlib.sha256(raw_str.encode('utf-8')).hexdigest()
 
     def get(self, hash_key: str) -> Optional[Any]:
-        """Retrieve cached state object by geometric hash key."""
+        """Retrieve cached state object by fingerprint key."""
         if hash_key in self._cache:
             self._hits += 1
             return self._cache[hash_key]
@@ -68,7 +63,7 @@ class StateCache:
         return hash_key in self._cache
 
     @property
-    def stats(self) -> Dict[str, int]:
+    def stats(self) -> Dict[str, Any]:
         """Return cache hit/miss statistics."""
         total = self._hits + self._misses
         hit_ratio = (self._hits / total * 100.0) if total > 0 else 0.0

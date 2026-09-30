@@ -59,6 +59,21 @@ class BendSeqOrchestrator:
         """
         start_time = time.time()
 
+        # Resolve output filename for safe GUI execution
+        if output_file == "part_bendseq.json":
+            try:
+                import FreeCAD
+                import os
+                doc = FreeCAD.ActiveDocument
+                if doc and getattr(doc, 'FileName', '') and os.path.isabs(doc.FileName):
+                    doc_dir = os.path.dirname(doc.FileName)
+                    output_file = os.path.join(doc_dir, "part_bendseq.json")
+                else:
+                    output_file = os.path.expanduser("~/part_bendseq.json")
+            except Exception:
+                import os
+                output_file = os.path.expanduser("~/part_bendseq.json")
+
         # Step 1: Extract sheet metal bend features
         features = self.extractor.extract_features(target_shape)
         if not features or "bends" not in features or not features["bends"]:
@@ -71,32 +86,61 @@ class BendSeqOrchestrator:
         k_factor = features.get("k_factor", 0.40)
         thickness = features.get("thickness", 2.0)
 
-        # Step 2: Initialize Backward Graph with StateCache & CollisionDetector
-        graph = BackwardGraph(
-            initial_shape=target_shape,
-            feature_map=bends_map,
-            sheetmetal_bridge=self.bridge,
-            collision_detector=self.collision_detector,
-            state_cache=self.state_cache
-        )
+        # Step 2: Build canonical BendGraph, PanelGraph & initial FoldState
+        from Physics.validator import PhysicalValidator
+        from Solvers.dfs_backward import DFSBackwardPlanner
+        from Solvers.astar_backward import AStarBackwardPlanner
+        from Solvers.greedy_unfold import GreedyUnfoldPlanner
+        from Core.bend_graph import BendGraph, BendRecord
+        from Core.panel_graph import PanelGraph
+        from Core.fold_state import FoldState
+
+        bg = BendGraph()
+        pg = PanelGraph()
+        for idx, (b_id, b_info) in enumerate(bends_map.items()):
+            parent_p = b_info.get("parent_panel_id", f"PANEL_{idx:02d}")
+            child_p = b_info.get("child_panel_id", f"PANEL_{(idx+1):02d}")
+            rec = BendRecord(
+                bend_id=b_id,
+                feature_id=f"FEAT_{b_id}",
+                parent_panel_id=parent_p,
+                child_panel_id=child_p,
+                axis_origin=tuple(b_info.get("origin", (0, 0, 0))),
+                axis_direction=tuple(b_info.get("axis", (1, 0, 0))),
+                signed_angle=b_info.get("angle", 90.0),
+                radius=b_info.get("radius", 2.0),
+                thickness=thickness,
+                length=b_info.get("length", 100.0)
+            )
+            bg.add_bend(rec)
+            pg.add_bend_connection(b_id, rec.parent_panel_id, rec.child_panel_id)
+
+        root_fold_state = FoldState.initial(target_shape, bg, pg)
+        validator = PhysicalValidator(self.machine)
 
         # Step 3: Select and execute backward solver
-        if algorithm.lower() == "greedy":
-            planner = GreedyUnfoldPlanner(graph=graph)
+        alg = algorithm.lower()
+        if alg == "dfs":
+            planner = DFSBackwardPlanner(bg, validator, pg, state_cache=self.state_cache)
+        elif alg == "greedy":
+            planner = GreedyUnfoldPlanner(bg, validator, pg, state_cache=self.state_cache)
         else:
-            planner = AStarBackwardPlanner(graph=graph)
+            planner = AStarBackwardPlanner(bg, validator, pg, state_cache=self.state_cache)
 
-        planning_result = planner.solve(max_iterations=max_iterations)
+        planning_result = planner.solve(root_fold_state, max_iterations=max_iterations)
 
         if not planning_result.get("success"):
+            rejections = planning_result.get("rejections", [])
+            reasons = [f"{r['bend_id']}:{r['stage']}({r['reason']})" for r in rejections] if rejections else []
+            err_msg = f"{algorithm.upper()} planning failed: {', '.join(reasons)}" if reasons else planning_result.get("error", "Solver failed to find a valid unfold path.")
             return {
                 "success": False,
-                "error": planning_result.get("error", "Solver failed to find a valid unfold path."),
+                "error": err_msg,
                 "planning_time": time.time() - start_time,
                 "cache_stats": self.state_cache.stats
             }
 
-        goal_state: BendState = planning_result["goal_state"]
+        goal_state = planning_result["goal_state"]
 
         # Step 4: Invert backward solution trajectory (Flat -> Step 1 -> Step 2 -> Fully Bent)
         forward_sequence = goal_state.reconstruct_forward_sequence()

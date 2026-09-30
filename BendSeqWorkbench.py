@@ -18,12 +18,54 @@ if MODULE_DIR not in sys.path:
     sys.path.insert(0, MODULE_DIR)
 
 if HAS_FREECAD_GUI:
+    XPM_PLANNER = """/* XPM */
+static char * xpm_planner[] = {
+"16 16 3 1",
+" 	c None",
+".	c #0088FF",
+"+	c #004488",
+"                ",
+"  ............  ",
+"  .++++++++++.  ",
+"  .++......++.  ",
+"  .++.    .++.  ",
+"  .++.    .++.  ",
+"  .++.    .++.  ",
+"  .++.    .++.  ",
+"  .++.    .++.  ",
+"  .++.    .++.  ",
+"  .++++++++++.  ",
+"  ............  ",
+"                ",
+"                "};"""
+
+    XPM_KINEMATICS = """/* XPM */
+static char * xpm_kinematics[] = {
+"16 16 3 1",
+" 	c None",
+".	c #FF8800",
+"+	c #884400",
+"                ",
+"  ............  ",
+"  .++++++++++.  ",
+"  .++++++++++.  ",
+"  .++......++.  ",
+"  .++.    .++.  ",
+"  .++.    .++.  ",
+"  .++.    .++.  ",
+"  .++++++++++.  ",
+"  .++++++++++.  ",
+"  ............  ",
+"                ",
+"                ",
+"                "};"""
+
     class CommandRunPlanner:
         """FreeCAD GUI Command: Run BendSeq Backward Planner on active object."""
 
         def GetResources(self):
             return {
-                'Pixmap': 'Part_SelectFilter',
+                'Pixmap': XPM_PLANNER,
                 'MenuText': 'Run Backward Planner',
                 'ToolTip': 'Executes backward search (bent -> flat) to find collision-free bend sequence'
             }
@@ -62,7 +104,7 @@ if HAS_FREECAD_GUI:
 
         def GetResources(self):
             return {
-                'Pixmap': 'Part_BoxParametric',
+                'Pixmap': XPM_KINEMATICS,
                 'MenuText': 'Show Machine Kinematics',
                 'ToolTip': 'Display punch, die, and backgauge tooling in 3D View'
             }

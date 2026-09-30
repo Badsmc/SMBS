@@ -1,51 +1,42 @@
 """
-base_planner.py - Common Base Interface for Backward Bend Sequence Solvers
+base_planner.py - Base Interface for Backward Bend Sequence Planners (SMBS Phase 8)
+
+SPEC v1.0 Requirement (Section 17):
+Common base interface for all sequence search planners.
+Uses heuristic estimation (without unproven claims of mathematical admissibility).
 """
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-from Core.backward_graph import BackwardGraph, BendState
+from Core.fold_state import FoldState
+from Physics.validator import PhysicalValidator
 
 
 class BasePlanner(ABC):
     """
-    Abstract Base Class for all BendSeq sequence search planners.
-    Ensures a consistent interface across different planning strategies (A*, Greedy, Monte Carlo, etc.).
+    Abstract Base Class for sequence search planners operating on FoldState & Physical Oracle.
     """
 
-    def __init__(self, graph: BackwardGraph):
-        self.graph = graph
+    def __init__(self, validator: PhysicalValidator):
+        self.validator = validator
 
     @abstractmethod
-    def solve(self, max_iterations: int = 5000) -> Dict[str, Any]:
+    def solve(self, initial_state: FoldState, max_iterations: int = 5000) -> Dict[str, Any]:
         """
-        Execute the solver algorithm to find a collision-free backward unfolding sequence.
+        Execute search algorithm to find a verified collision-free fold sequence.
 
-        :param max_iterations: Maximum node expansions allowed before aborting.
-        :return: Dictionary containing 'success', 'goal_state', 'nodes_explored', 'error'.
+        :param initial_state: Root FoldState.
+        :param max_iterations: Maximum node expansions allowed.
+        :return: Planning result dictionary.
         """
         pass
 
-    def compute_heuristic(self, state: BendState) -> float:
+    def compute_heuristic(self, state: FoldState) -> float:
         """
-        Admissible & consistent heuristic for backward planning.
-
-        Estimates remaining cost from current state down to fully flat target state:
-        1. Number of remaining bends (each bend requires at least 1 stroke).
-        2. Flange clearance heuristic (outer flanges should be unfolded before inner/enclosed bends).
+        Domain heuristic estimate for remaining unfolding cost.
+        Returns number of remaining folded bends.
         """
         num_remaining = len(state.remaining_bends)
         if num_remaining == 0:
             return 0.0
-
-        base_h = float(num_remaining)
-
-        # Additional domain heuristic: count remaining bends with potential box enclosure
-        enclosure_penalty = 0.0
-        for bend_id in state.remaining_bends:
-            bend_info = self.graph.feature_map.get(bend_id, {})
-            # Longer bends or bends with large angles incur higher un-nesting complexity
-            if bend_info.get("length", 0) > 200.0:
-                enclosure_penalty += 0.2
-
-        return base_h + enclosure_penalty
+        return float(num_remaining)

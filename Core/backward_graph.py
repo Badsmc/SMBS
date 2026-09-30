@@ -144,6 +144,7 @@ class BackwardGraph:
             
             if collision:
                 # Collision detected -> invalid backward branch
+                # print(f"DEBUG: Candidate bend {bend_id} rejected: {collision_msg}")
                 continue
 
             # Step 3: Create successor state parameters

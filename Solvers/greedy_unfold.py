@@ -1,46 +1,77 @@
 """
-greedy_unfold.py - Fast Greedy Backward Unfold Planner
+greedy_unfold.py - Fast Greedy Backward Unfold Planner (SMBS Phase 8/9)
 
-Selects the first physically valid, collision-free bend that minimizes local step cost.
-Provides ultra-fast sequence finding for standard sheet metal parts (boxes, brackets, covers).
+Selects the first physically valid, collision-free bend that minimizes local heuristic cost.
+Provides ultra-fast sequence finding operating on canonical FoldState and Physical Oracle gate.
 """
 
-from typing import Dict, Any
-from Core.backward_graph import BackwardGraph, BendState
+from typing import Dict, Any, Optional
+from Core.fold_state import FoldState
+from Core.bend_graph import BendGraph
+from Core.panel_graph import PanelGraph
+from Core.state_cache import StateCache
+from Physics.validator import PhysicalValidator, ValidationResult
 from .base_planner import BasePlanner
 
 
 class GreedyUnfoldPlanner(BasePlanner):
     """
-    Greedy Solver operating in inverted state space.
+    Greedy Solver operating on FoldState & Physical Oracle Gate.
     """
 
-    def solve(self, max_iterations: int = 5000) -> Dict[str, Any]:
+    def __init__(
+        self,
+        bend_graph: BendGraph,
+        validator: PhysicalValidator,
+        panel_graph: Optional[PanelGraph] = None,
+        state_cache: Optional[StateCache] = None
+    ):
+        super().__init__(validator)
+        self.bend_graph = bend_graph
+        self.panel_graph = panel_graph
+        self.cache = state_cache or StateCache()
+
+    def solve(
+        self,
+        initial_state: FoldState,
+        max_iterations: int = 5000
+    ) -> Dict[str, Any]:
         """
         Execute greedy backward search.
         """
-        current = self.graph.root_state
-        current.h_cost = self.compute_heuristic(current)
-
+        current = initial_state
         nodes_explored = 0
 
         while not current.is_goal() and nodes_explored < max_iterations:
             nodes_explored += 1
-            
+
             best_successor = None
             best_cost = float('inf')
 
-            # Expand all candidate backward transitions from current state
-            for successor, step_cost in self.graph.expand_successors(current):
-                local_h = self.compute_heuristic(successor)
-                total_local_cost = step_cost + local_h
+            candidates = sorted(list(current.remaining_bends))
 
-                if total_local_cost < best_cost:
-                    best_cost = total_local_cost
+            for bend_id in candidates:
+                bend_rec = self.bend_graph.get_bend(bend_id)
+                if bend_rec is None:
+                    continue
+
+                val_result: ValidationResult = self.validator.validate_step(
+                    current_state=current,
+                    bend_record=bend_rec,
+                    panel_graph=self.panel_graph
+                )
+
+                if not val_result.valid or val_result.next_state is None:
+                    continue
+
+                successor = val_result.next_state
+                local_h = self.compute_heuristic(successor)
+
+                if local_h < best_cost:
+                    best_cost = local_h
                     best_successor = successor
 
             if best_successor is None:
-                # Dead-end reached: no collision-free bend can be unfolded from current state
                 return {
                     "success": False,
                     "error": f"Greedy planner hit dead-end at {len(current.remaining_bends)} remaining bends.",
@@ -53,7 +84,8 @@ class GreedyUnfoldPlanner(BasePlanner):
             return {
                 "success": True,
                 "goal_state": current,
-                "nodes_explored": nodes_explored
+                "nodes_explored": nodes_explored,
+                "cache_stats": self.cache.stats
             }
 
         return {
@@ -61,3 +93,4 @@ class GreedyUnfoldPlanner(BasePlanner):
             "error": "Greedy planner exceeded maximum iteration limit.",
             "nodes_explored": nodes_explored
         }
+

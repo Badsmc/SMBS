@@ -40,6 +40,13 @@ class BendSeqWriter:
         }
 
         abs_path = os.path.abspath(filename)
+        dir_name = os.path.dirname(abs_path)
+        
+        # Fallback if target directory is root '/' or not writable
+        if dir_name == "/" or not os.path.exists(dir_name) or not os.access(dir_name, os.W_OK):
+            file_basename = os.path.basename(filename) or "part_bendseq.json"
+            abs_path = os.path.expanduser(os.path.join("~", file_basename))
+
         with open(abs_path, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, indent=2)
 
