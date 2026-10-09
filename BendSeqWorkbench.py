@@ -145,8 +145,27 @@ if HAS_FREECAD_GUI:
             shutil.copy2(filename, dest_path)
             FreeCAD.Console.PrintMessage(f"BendSeq: Imported {self.tool_type} -> {dest_path}\n")
 
+    class CommandFlatPatternSequence:
+        """FreeCAD GUI Command: Show Flat Pattern Sequence."""
+
+        def GetResources(self):
+            return {
+                'Pixmap': get_icon_path("flat_pattern.svg"),
+                'MenuText': 'Flat Pattern Sequence',
+                'ToolTip': 'Display the bend sequence operations and flat pattern mapping'
+            }
+
+        def IsActive(self):
+            doc = FreeCAD.ActiveDocument
+            return doc is not None
+
+        def Activated(self):
+            from GUI.bend_sequence_view import show_sequence_view
+            show_sequence_view()
+
     FreeCADGui.addCommand("BendSeq_RunPlanner", CommandRunPlanner())
     FreeCADGui.addCommand("BendSeq_ShowKinematics", CommandShowKinematics())
     FreeCADGui.addCommand("BendSeq_ImportPunch", CommandImportTooling("punch"))
     FreeCADGui.addCommand("BendSeq_ImportDie", CommandImportTooling("die"))
     FreeCADGui.addCommand("BendSeq_ImportPress", CommandImportTooling("presses"))
+    FreeCADGui.addCommand("BendSeq_FlatPatternSequence", CommandFlatPatternSequence())

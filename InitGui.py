@@ -24,6 +24,7 @@ class BendSeqWorkbench (FreeCADGui.Workbench):
         self.appendToolbar("BendSeq Tools", [
             "BendSeq_RunPlanner", 
             "BendSeq_ShowKinematics",
+            "BendSeq_FlatPatternSequence",
             "BendSeq_ImportPunch",
             "BendSeq_ImportDie",
             "BendSeq_ImportPress"
@@ -31,6 +32,7 @@ class BendSeqWorkbench (FreeCADGui.Workbench):
         self.appendMenu("BendSeq", [
             "BendSeq_RunPlanner", 
             "BendSeq_ShowKinematics",
+            "BendSeq_FlatPatternSequence",
             "BendSeq_ImportPunch",
             "BendSeq_ImportDie",
             "BendSeq_ImportPress"
