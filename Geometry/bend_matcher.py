@@ -82,8 +82,8 @@ def match_bends_to_sketch(
     flat_centers: Dict[str, Tuple[float, float, float]],
     bends_dict: Dict[str, Dict[str, Any]],
     sketch_lines: List[Dict[str, Any]],
-    length_tolerance: float = 5.0,
-    distance_tolerance: float = 5.0
+    length_tolerance: float = 100.0,
+    distance_tolerance: float = 10.0
 ) -> Dict[str, BendMappingRecord]:
     """
     Matches computed flat centers of bends to 2D FreeCAD sketch lines.
@@ -117,7 +117,7 @@ def match_bends_to_sketch(
             bend_dist_matrix[(bid_i, bid_j)] = math.sqrt((ci[0]-cj[0])**2 + (ci[1]-cj[1])**2 + (ci[2]-cj[2])**2)
 
     used_lines = set()
-    
+
     for bid in bend_ids:
         b_data = bends_dict[bid]
         target_len = b_data.get("length", 100.0)
@@ -144,7 +144,6 @@ def match_bends_to_sketch(
             continue
             
         if len(candidates) == 1:
-            # Direct length match!
             idx = candidates[0]["index"]
             if idx in used_lines:
                 rec.match_status = BendMatchStatus.AMBIGUOUS
@@ -153,9 +152,9 @@ def match_bends_to_sketch(
                 used_lines.add(idx)
                 rec.match_status = BendMatchStatus.MATCHED
                 rec.flat_line_index = idx
-                rec.flat_start_point = candidates[0]["start"]
-                rec.flat_end_point = candidates[0]["end"]
-                rec.match_method = "length"
+            rec.flat_start_point = candidates[0]["start"]
+            rec.flat_end_point = candidates[0]["end"]
+            rec.match_method = "length"
             results[bid] = rec
             continue
 
@@ -163,6 +162,7 @@ def match_bends_to_sketch(
         # Find which candidate best matches the distance to ALL ALREADY MATCHED bends,
         # or just distances to all other bends (isomorphism).
         best_candidate = None
+        best_match_score = -1
         best_error = float('inf')
         ambiguous = False
         
@@ -171,32 +171,43 @@ def match_bends_to_sketch(
             if cand_idx in used_lines:
                 continue
                 
-            # Compare distances from `bid` to all other `other_bid`
-            # vs distances from `cand` to all lines `cand_other`
-            # This requires we know the mapping for `other_bid`.
-            # A simple heuristic: check max geometric distance between distance arrays.
-            # (Sort the distances and compare).
-            
             my_dists = sorted([bend_dist_matrix[(bid, other)] for other in bend_ids if other != bid])
             cand_dists = sorted([sketch_dist_matrix[(sketch_lines.index(cand), j)] for j in range(len(sketch_lines)) if j != sketch_lines.index(cand)])
             
-            # Pad or truncate to match sizes (should be equal if 1:1)
-            min_len = min(len(my_dists), len(cand_dists))
-            err = sum(abs(my_dists[k] - cand_dists[k]) for k in range(min_len))
+            match_score = 0
+            err_sum = 0.0
             
-            if err < best_error - distance_tolerance:
-                best_error = err
+            used_my = set()
+            for cd in cand_dists:
+                best_d = None
+                best_diff = float('inf')
+                best_k = -1
+                for k, md in enumerate(my_dists):
+                    if k not in used_my:
+                        diff = abs(cd - md)
+                        if diff < best_diff:
+                            best_diff = diff
+                            best_k = k
+                            best_d = md
+                if best_diff <= distance_tolerance:
+                    match_score += 1
+                    err_sum += best_diff
+                    used_my.add(best_k)
+                else:
+                    err_sum += 1000.0
+            
+            if match_score > best_match_score or (match_score == best_match_score and err_sum < best_error - 1.0):
+                best_match_score = match_score
+                best_error = err_sum
                 best_candidate = cand
-                ambiguous = False
-            elif abs(err - best_error) <= distance_tolerance:
-                ambiguous = True
+            elif match_score == best_match_score and abs(err_sum - best_error) <= 1.0:
+                # Tie breaker: deterministically pick the smaller index to ensure stability
+                if best_candidate is None or cand["index"] < best_candidate["index"]:
+                    best_candidate = cand
 
-        if ambiguous and best_candidate:
-            ambiguous = False
-
-        if ambiguous or not best_candidate:
+        if not best_candidate:
             rec.match_status = BendMatchStatus.AMBIGUOUS
-            rec.error_reason = "Distance matrix check yielded multiple symmetric identical candidates."
+            rec.error_reason = "No candidate found after distance matrix check."
         else:
             used_lines.add(best_candidate["index"])
             rec.match_status = BendMatchStatus.MATCHED

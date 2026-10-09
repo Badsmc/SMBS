@@ -137,7 +137,7 @@ class FeatureExtractor:
                             try:
                                 u_min, u_max, _, _ = face.ParameterRange
                                 span_deg = math.degrees(abs(u_max - u_min))
-                                if span_deg > 175.0 or span_deg < 5.0:
+                                if span_deg > 175.0 or span_deg < 20.0:
                                     is_valid_bend = False
                                 else:
                                     signed_angle = round(span_deg, 1)
@@ -176,21 +176,21 @@ class FeatureExtractor:
                 ec = existing["center_loc"]
                 ea = existing["axis_dir"]
                 
-                # Same center? (Inner/outer face deduplication)
-                dist = math.sqrt((ec[0] - raw["center_loc"][0])**2 + (ec[1] - raw["center_loc"][1])**2 + (ec[2] - raw["center_loc"][2])**2)
-                if dist < thickness * 2.0:
-                    is_duplicate_or_collinear = True
-                    break
-                    
-                # Collinear check:
-                # 1. Same direction (cross product approx 0)
+                # Calculate cross product to check if axes are parallel
                 cross_dir = (
                     ea[1]*raw["axis_dir"][2] - ea[2]*raw["axis_dir"][1],
                     ea[2]*raw["axis_dir"][0] - ea[0]*raw["axis_dir"][2],
                     ea[0]*raw["axis_dir"][1] - ea[1]*raw["axis_dir"][0]
                 )
                 mag_cross = math.sqrt(cross_dir[0]**2 + cross_dir[1]**2 + cross_dir[2]**2)
-                
+
+                # Same center? (Inner/outer face deduplication)
+                dist = math.sqrt((ec[0] - raw["center_loc"][0])**2 + (ec[1] - raw["center_loc"][1])**2 + (ec[2] - raw["center_loc"][2])**2)
+                if dist < thickness * 2.0 and mag_cross < 1e-3:
+                    is_duplicate_or_collinear = True
+                    break
+                    
+                # Collinear check:
                 if mag_cross < 1e-3: # Parallel axes
                     # Check if origin lies on the same line
                     vec_orig = (raw["center_loc"][0] - ec[0], raw["center_loc"][1] - ec[1], raw["center_loc"][2] - ec[2])
@@ -202,13 +202,12 @@ class FeatureExtractor:
                     dist_to_line = math.sqrt(cross_orig[0]**2 + cross_orig[1]**2 + cross_orig[2]**2)
                     
                     if dist_to_line < thickness * 2.0: # Collinear
-                        # Ensure radius, sign, and angle match
-                        if (abs(existing["inner_radius"] - raw["inner_radius"]) < 0.5 and 
-                            existing["bend_sign"] == raw["bend_sign"] and 
+                        # Ensure sign and angle match (ignore radius as inner/outer might differ due to B-Rep modeling)
+                        if (existing["bend_sign"] == raw["bend_sign"] and 
                             abs(existing["signed_angle"] - raw["signed_angle"]) < 5.0):
                             
-                            # Merge them! Add lengths.
-                            existing["bend_length"] += raw["bend_length"]
+                            # Merge them! We take the max length since this is typically an inner/outer face pair merging
+                            existing["bend_length"] = max(existing["bend_length"], raw["bend_length"])
                             is_duplicate_or_collinear = True
                             break
                             
