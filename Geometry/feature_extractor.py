@@ -112,11 +112,7 @@ class FeatureExtractor:
 
     def _detect_bends(self, shape: Any, thickness: float) -> Dict[str, Dict[str, Any]]:
         """Find cylindrical surfaces corresponding to sheet metal bends and deduplicate inner/outer faces."""
-        bends = {}
-        bend_counter = 1
-        
-        # Keep track of detected bends to avoid double-counting inner/outer faces
-        detected_centers = []
+        raw_bends = []
 
         if hasattr(shape, 'Faces'):
             for face_idx, face in enumerate(shape.Faces):
@@ -163,71 +159,88 @@ class FeatureExtractor:
                             bend_sign = -1
                             signed_angle = -signed_angle
 
-                        # Deduplication & Collinear Merging
-                        is_duplicate_or_collinear = False
-                        for existing_id, existing_rec in bends.items():
-                            ec = existing_rec["origin"]
-                            ea = existing_rec["axis"]
-                            
-                            # Same center? (Inner/outer face deduplication)
-                            dist = math.sqrt((ec[0] - center_loc[0])**2 + (ec[1] - center_loc[1])**2 + (ec[2] - center_loc[2])**2)
-                            if dist < thickness * 2.0:
-                                is_duplicate_or_collinear = True
-                                break
-                                
-                            # Collinear check:
-                            # 1. Same direction (cross product approx 0)
-                            cross_dir = (
-                                ea[1]*axis_dir[2] - ea[2]*axis_dir[1],
-                                ea[2]*axis_dir[0] - ea[0]*axis_dir[2],
-                                ea[0]*axis_dir[1] - ea[1]*axis_dir[0]
-                            )
-                            mag_cross = math.sqrt(cross_dir[0]**2 + cross_dir[1]**2 + cross_dir[2]**2)
-                            
-                            if mag_cross < 1e-3: # Parallel axes
-                                # Check if origin lies on the same line
-                                vec_orig = (center_loc[0] - ec[0], center_loc[1] - ec[1], center_loc[2] - ec[2])
-                                cross_orig = (
-                                    ea[1]*vec_orig[2] - ea[2]*vec_orig[1],
-                                    ea[2]*vec_orig[0] - ea[0]*vec_orig[2],
-                                    ea[0]*vec_orig[1] - ea[1]*vec_orig[0]
-                                )
-                                dist_to_line = math.sqrt(cross_orig[0]**2 + cross_orig[1]**2 + cross_orig[2]**2)
-                                
-                                if dist_to_line < thickness * 2.0: # Collinear
-                                    # Ensure radius, sign, and angle match
-                                    if (abs(existing_rec["radius"] - inner_radius) < 0.5 and 
-                                        existing_rec["bend_sign"] == bend_sign and 
-                                        abs(existing_rec["angle"] - signed_angle) < 5.0):
-                                        
-                                        # Merge them! Add lengths.
-                                        existing_rec["length"] += bend_length
-                                        is_duplicate_or_collinear = True
-                                        break
-                                        
-                        if is_duplicate_or_collinear:
-                            continue
+                        raw_bends.append({
+                            "inner_radius": inner_radius,
+                            "axis_dir": axis_dir,
+                            "center_loc": center_loc,
+                            "signed_angle": signed_angle,
+                            "bend_sign": bend_sign,
+                            "bend_length": bend_length
+                        })
 
-                        # Panel adjacency ids
-                        parent_panel_id = f"PANEL_{(bend_counter - 1):02d}"
-                        child_panel_id = f"PANEL_{bend_counter:02d}"
+        # Deduplication & Collinear Merging
+        merged_bends = []
+        for raw in raw_bends:
+            is_duplicate_or_collinear = False
+            for existing in merged_bends:
+                ec = existing["center_loc"]
+                ea = existing["axis_dir"]
+                
+                # Same center? (Inner/outer face deduplication)
+                dist = math.sqrt((ec[0] - raw["center_loc"][0])**2 + (ec[1] - raw["center_loc"][1])**2 + (ec[2] - raw["center_loc"][2])**2)
+                if dist < thickness * 2.0:
+                    is_duplicate_or_collinear = True
+                    break
+                    
+                # Collinear check:
+                # 1. Same direction (cross product approx 0)
+                cross_dir = (
+                    ea[1]*raw["axis_dir"][2] - ea[2]*raw["axis_dir"][1],
+                    ea[2]*raw["axis_dir"][0] - ea[0]*raw["axis_dir"][2],
+                    ea[0]*raw["axis_dir"][1] - ea[1]*raw["axis_dir"][0]
+                )
+                mag_cross = math.sqrt(cross_dir[0]**2 + cross_dir[1]**2 + cross_dir[2]**2)
+                
+                if mag_cross < 1e-3: # Parallel axes
+                    # Check if origin lies on the same line
+                    vec_orig = (raw["center_loc"][0] - ec[0], raw["center_loc"][1] - ec[1], raw["center_loc"][2] - ec[2])
+                    cross_orig = (
+                        ea[1]*vec_orig[2] - ea[2]*vec_orig[1],
+                        ea[2]*vec_orig[0] - ea[0]*vec_orig[2],
+                        ea[0]*vec_orig[1] - ea[1]*vec_orig[0]
+                    )
+                    dist_to_line = math.sqrt(cross_orig[0]**2 + cross_orig[1]**2 + cross_orig[2]**2)
+                    
+                    if dist_to_line < thickness * 2.0: # Collinear
+                        # Ensure radius, sign, and angle match
+                        if (abs(existing["inner_radius"] - raw["inner_radius"]) < 0.5 and 
+                            existing["bend_sign"] == raw["bend_sign"] and 
+                            abs(existing["signed_angle"] - raw["signed_angle"]) < 5.0):
+                            
+                            # Merge them! Add lengths.
+                            existing["bend_length"] += raw["bend_length"]
+                            is_duplicate_or_collinear = True
+                            break
+                            
+            if not is_duplicate_or_collinear:
+                merged_bends.append(raw)
 
-                        bend_id = f"BEND_{bend_counter:02d}"
-                        bend_rec = BendRecord(
-                            bend_id=bend_id,
-                            feature_id=f"FEAT_{bend_id}",
-                            parent_panel_id=parent_panel_id,
-                            child_panel_id=child_panel_id,
-                            axis_origin=center_loc,
-                            axis_direction=axis_dir,
-                            signed_angle=signed_angle,
-                            radius=inner_radius,
-                            thickness=thickness,
-                            bend_sign=bend_sign,
-                            length=bend_length
-                        )
-                        bends[bend_id] = bend_rec.to_dict()
-                        bend_counter += 1
+        # Sort bends deterministically by X, Y, Z to ensure stable IDs
+        merged_bends.sort(key=lambda b: (round(b["center_loc"][0], 1), round(b["center_loc"][1], 1), round(b["center_loc"][2], 1)))
+
+        bends = {}
+        bend_counter = 1
+        for b in merged_bends:
+            # Panel adjacency ids
+            parent_panel_id = f"PANEL_{(bend_counter - 1):02d}"
+            child_panel_id = f"PANEL_{bend_counter:02d}"
+
+            bend_id = f"BEND_{bend_counter:02d}"
+            bend_rec = BendRecord(
+                bend_id=bend_id,
+                feature_id=f"FEAT_{bend_id}",
+                parent_panel_id=parent_panel_id,
+                child_panel_id=child_panel_id,
+                axis_origin=b["center_loc"],
+                axis_direction=b["axis_dir"],
+                signed_angle=b["signed_angle"],
+                radius=b["inner_radius"],
+                thickness=thickness,
+                bend_sign=b["bend_sign"],
+                length=b["bend_length"]
+            )
+            bends[bend_id] = bend_rec.to_dict()
+            bend_counter += 1
 
         return bends
 
