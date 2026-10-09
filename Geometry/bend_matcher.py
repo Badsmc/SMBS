@@ -51,9 +51,6 @@ def compute_flat_coordinates(
             # Apply all accumulated transforms to the bend's origin
             flat_pt = bend_data["axis_origin"]
             # Apply transforms in order from leaf back to root (local to global)
-            # transforms list is built using insert(0, ...), so index 0 is the closest bend (leaf-ward),
-            # and the last element is the bend connected to the root.
-            # We must apply the innermost rotation first!
             for (cx, cy, cz), (dx, dy, dz), angle in transforms:
                 flat_pt = BendTransform.transform_point(flat_pt, (cx, cy, cz), (dx, dy, dz), angle)
             

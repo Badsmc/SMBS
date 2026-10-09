@@ -273,13 +273,17 @@ def show_sequence_view():
     sel = FreeCADGui.Selection.getSelection()
     target_obj = sel[0] if sel else None
 
-    # If not selected, try to find the part from the SMUnfold object!
-    if not target_obj:
-        for obj in doc.Objects:
-            if hasattr(obj, "Proxy") and obj.Proxy.__class__.__name__ == "SMUnfold":
-                if hasattr(obj, "baseObject") and obj.baseObject:
-                    target_obj = obj.baseObject[0]
-                break
+    # If not selected correctly (e.g. they selected Pad or Bend001), try to find the final part from the SMUnfold object!
+    unfold_obj = None
+    for obj in doc.Objects:
+        if hasattr(obj, "Proxy") and obj.Proxy.__class__.__name__ == "SMUnfold":
+            unfold_obj = obj
+            break
+            
+    if unfold_obj and hasattr(unfold_obj, "baseObject") and unfold_obj.baseObject:
+        final_part = unfold_obj.baseObject[0]
+        # If user selected nothing, or they selected something that has fewer bends than the final part
+        target_obj = final_part
 
     if not target_obj:
         FreeCAD.Console.PrintError("BendSeq: Please select the 3D sheet metal part or create an Unfold first.\n")
