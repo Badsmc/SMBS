@@ -92,5 +92,9 @@ class PanelGraph:
         moving = self.moving_subtree(bend_id)
         return set(self.panels.keys()) - moving
 
+    def are_adjacent(self, panel_id_1: str, panel_id_2: str) -> bool:
+        """Check if two panels are connected by a bend line (neighbors)."""
+        return panel_id_2 in self._adj.get(panel_id_1, {})
+
     def __len__(self) -> int:
         return len(self.panels)

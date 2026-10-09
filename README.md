@@ -7,7 +7,7 @@
 ## Directory Structure
 
 ```
-SMBS/
+BendSeq/
 ├── Init.py                       # FreeCAD registration
 ├── InitGui.py                    # FreeCAD GUI Workbench registration
 ├── BendSeqWorkbench.py           # Workbench + toolbar commands

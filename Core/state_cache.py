@@ -15,8 +15,9 @@ class StateCache:
     Thread-safe physical state cache avoiding redundant state evaluation.
     """
 
-    def __init__(self):
+    def __init__(self, max_size: int = 1000):
         self._cache: Dict[str, Any] = {}
+        self._max_size: int = max_size
         self._hits: int = 0
         self._misses: int = 0
 
@@ -46,17 +47,30 @@ class StateCache:
 
         return hashlib.sha256(raw_str.encode('utf-8')).hexdigest()
 
-    def get(self, hash_key: str) -> Optional[Any]:
-        """Retrieve cached state object by fingerprint key."""
+    def get(self, hash_key: str) -> Optional[Dict[str, Any]]:
+        """Retrieve cached lightweight metadata by fingerprint key."""
         if hash_key in self._cache:
             self._hits += 1
-            return self._cache[hash_key]
+            # Move to end to simulate LRU
+            val = self._cache.pop(hash_key)
+            self._cache[hash_key] = val
+            return val
         self._misses += 1
         return None
 
-    def put(self, hash_key: str, state_object: Any) -> None:
-        """Store state object in cache."""
-        self._cache[hash_key] = state_object
+    def put(self, hash_key: str, state_meta: Optional[Dict[str, Any]] = None) -> None:
+        """Store lightweight state metadata in cache with LRU eviction."""
+        if hash_key in self._cache:
+            self._cache.pop(hash_key)
+            self._cache[hash_key] = state_meta or {"visited": True}
+            return
+            
+        if len(self._cache) >= self._max_size:
+            oldest_key = next(iter(self._cache))
+            self._cache.pop(oldest_key)
+
+        # Store only lightweight metadata, never heavy objects or TopoShapes
+        self._cache[hash_key] = state_meta or {"visited": True}
 
     def contains(self, hash_key: str) -> bool:
         """Check if hash key exists in cache."""

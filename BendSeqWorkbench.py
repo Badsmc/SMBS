@@ -96,5 +96,57 @@ if HAS_FREECAD_GUI:
             machine.add_to_doc(doc)
             FreeCAD.Console.PrintMessage("BendSeq: Press brake tooling solids added to document.\n")
 
+    class CommandImportTooling:
+        """FreeCAD GUI Command: Import Tooling (FCStd) into Library."""
+        
+        def __init__(self, tool_type: str):
+            self.tool_type = tool_type
+            
+        def GetResources(self):
+            return {
+                'Pixmap': get_icon_path(f"import_{self.tool_type}.svg"),
+                'MenuText': f'Import {self.tool_type.capitalize()}',
+                'ToolTip': f'Import an FCStd file to the SMBS Tool Library ({self.tool_type})'
+            }
+
+        def IsActive(self):
+            return True
+
+        def Activated(self):
+            import shutil
+            import os
+            try:
+                from PySide2 import QtWidgets as QtGui
+            except ImportError:
+                try:
+                    from PySide import QtGui
+                except ImportError:
+                    from PySide6 import QtWidgets as QtGui
+            
+            filename, _ = QtGui.QFileDialog.getOpenFileName(
+                None,
+                f"Select {self.tool_type.capitalize()} FCStd",
+                "",
+                "FreeCAD Documents (*.FCStd)"
+            )
+            
+            if not filename:
+                return
+                
+            # Save directly inside the BendSeq module folder in FreeCAD Mod
+            base_dir = get_module_dir()
+            
+            dest_dir = os.path.join(base_dir, "toollibrary", self.tool_type)
+            os.makedirs(dest_dir, exist_ok=True)
+            
+            basename = os.path.basename(filename)
+            dest_path = os.path.join(dest_dir, basename)
+            
+            shutil.copy2(filename, dest_path)
+            FreeCAD.Console.PrintMessage(f"BendSeq: Imported {self.tool_type} -> {dest_path}\n")
+
     FreeCADGui.addCommand("BendSeq_RunPlanner", CommandRunPlanner())
     FreeCADGui.addCommand("BendSeq_ShowKinematics", CommandShowKinematics())
+    FreeCADGui.addCommand("BendSeq_ImportPunch", CommandImportTooling("punch"))
+    FreeCADGui.addCommand("BendSeq_ImportDie", CommandImportTooling("die"))
+    FreeCADGui.addCommand("BendSeq_ImportPress", CommandImportTooling("presses"))

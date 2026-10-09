@@ -51,6 +51,7 @@ class PhysicalValidator:
     def __init__(self, machine: PressBrakeMachine):
         self.machine = machine
         self.detector = CollisionDetector(self.machine)
+        self.invalid_transitions: Dict[Tuple[str, str], ValidationResult] = {}
 
     def validate_step(
         self,
@@ -72,62 +73,91 @@ class PhysicalValidator:
         7. Construct & return next FoldState
         """
         bend_id = bend_record.id
+        current_fp = current_state.fingerprint()
+        
+        # Check transition cache first (fast rejection)
+        cache_key = (current_fp, bend_id)
+        if cache_key in self.invalid_transitions:
+            return self.invalid_transitions[cache_key]
 
-        # Stage 1: Candidate consistency check
+        # Stage 1: Candidate consistency & approach check
         if bend_id not in current_state.remaining_bends:
             return ValidationResult(
                 valid=False,
                 reason=f"Bend {bend_id} is not in remaining_bends set.",
-                stage="consistency"
+                stage="APPROACH"
             )
+            
+        bend_info = bend_record.to_dict()
+        app_coll, app_msg = self.detector.approach_collision(current_state.shape, bend_info)
+        if app_coll:
+            if HAS_FREECAD:
+                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=APPROACH: {app_msg}\n")
+            res = ValidationResult(valid=False, reason=app_msg, stage="APPROACH")
+            self.invalid_transitions[cache_key] = res
+            return res
 
-        # Stage 2: Resolve moving panel subtree
+        # Stage 2: Kinematics subtree resolution and transformation
         moving_panels = panel_graph.moving_subtree(bend_id) if panel_graph else set()
-
-        # Stage 3: Unfold kinematics transformation using Single Kinematic Backend
         unfolded_shape = BendTransform.rotate_subtree(
             current_state.shape,
             bend_record.axis_origin,
             bend_record.axis_direction,
-            -bend_record.signed_angle
+            -bend_record.signed_angle,
+            moving_panels,
+            panel_graph
         )
 
-        bend_info = bend_record.to_dict()
-
-        # Stage 4: Layer 1 Self Collision Check
-        self_coll, self_msg = self.detector.self_collision(unfolded_shape)
+        # Stage 3: SELF Collision Check
+        self_coll, self_msg = self.detector.self_collision(unfolded_shape, bend_id, panel_graph)
         if self_coll:
             if HAS_FREECAD:
-                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=self: {self_msg}\n")
-            return ValidationResult(valid=False, reason=self_msg, stage="self")
+                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=SELF: {self_msg}\n")
+            res = ValidationResult(valid=False, reason=self_msg, stage="SELF")
+            self.invalid_transitions[cache_key] = res
+            return res
 
-        # Stage 5: Layer 2 Tool Collision Check
-        tool_coll, tool_msg = self.detector.tool_collision(unfolded_shape, bend_info)
+        # Stage 4: TOOL Collision Check
+        tool_coll, tool_msg = self.detector.tool_collision(unfolded_shape, bend_info, bend_id, panel_graph)
         if tool_coll:
             if HAS_FREECAD:
-                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=tool: {tool_msg}\n")
-            return ValidationResult(valid=False, reason=tool_msg, stage="tool")
+                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=TOOL: {tool_msg}\n")
+            res = ValidationResult(valid=False, reason=tool_msg, stage="TOOL")
+            self.invalid_transitions[cache_key] = res
+            return res
 
-        # Stage 6: Layer 3 Machine Collision Check
-        mach_coll, mach_msg = self.detector.machine_collision(unfolded_shape, bend_info)
+        # Stage 5: MACHINE Collision Check
+        mach_coll, mach_msg = self.detector.machine_collision(unfolded_shape, bend_info, bend_id, panel_graph)
         if mach_coll:
             if HAS_FREECAD:
-                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=machine: {mach_msg}\n")
-            return ValidationResult(valid=False, reason=mach_msg, stage="machine")
+                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=MACHINE: {mach_msg}\n")
+            res = ValidationResult(valid=False, reason=mach_msg, stage="MACHINE")
+            self.invalid_transitions[cache_key] = res
+            return res
 
-        # Stage 7: Layer 4 Trajectory Sweep Collision Check (Δθ = 5.0°)
+        # Stage 6: BEND Trajectory Sweep Collision Check (Δθ = 5.0°)
         traj_coll, traj_msg = self.detector.trajectory_collision(current_state.shape, bend_info, dtheta=5.0)
         if traj_coll:
             if HAS_FREECAD:
-                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=trajectory: {traj_msg}\n")
-            return ValidationResult(valid=False, reason=traj_msg, stage="trajectory")
+                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=BEND_TRAJECTORY: {traj_msg}\n")
+            res = ValidationResult(valid=False, reason=traj_msg, stage="BEND_TRAJECTORY")
+            self.invalid_transitions[cache_key] = res
+            return res
+
+        # Stage 7: RETRACT Collision Check
+        ret_coll, ret_msg = self.detector.retract_collision(unfolded_shape, bend_info)
+        if ret_coll:
+            if HAS_FREECAD:
+                FreeCAD.Console.PrintMessage(f"BendSeq: Reject [{bend_id}] stage=RETRACT: {ret_msg}\n")
+            res = ValidationResult(valid=False, reason=ret_msg, stage="RETRACT")
+            self.invalid_transitions[cache_key] = res
+            return res
 
         # Step is VALID -> Produce next FoldState
         next_fold_state = current_state.apply_unfold(
             bend_id=bend_id,
             unfolded_shape=unfolded_shape,
-            moving_panels=moving_panels,
-            unfold_cost=1.0
+            moving_panels=moving_panels
         )
 
         return ValidationResult(

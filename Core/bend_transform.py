@@ -11,7 +11,7 @@ Implements Rodrigues' Rotation Formula:
   P' = C + R(θ)*(P - C)
 """
 
-from typing import Tuple, List, Any, Optional
+from typing import Tuple, List, Any, Optional, Set
 import math
 
 try:
@@ -106,12 +106,16 @@ class BendTransform:
         shape: Any,
         axis_origin: Tuple[float, float, float],
         axis_direction: Tuple[float, float, float],
-        signed_angle_deg: float
+        signed_angle_deg: float,
+        moving_panels: Optional[Set[str]] = None,
+        panel_graph: Optional[Any] = None
     ) -> Any:
         """
         LAW-2 Single Kinematic Backend entry point for CAD TopoShape rotation.
 
-        Rotates moving panel subtree around (axis_origin, axis_direction) by signed_angle_deg.
+        Rotates ONLY the moving panel subtree around (axis_origin, axis_direction) by signed_angle_deg.
+        If moving_panels and panel_graph are provided, it builds a new Part.Compound by rotating
+        only the faces belonging to moving_panels. Otherwise, it rotates the entire shape.
         """
         if not HAS_FREECAD or shape is None:
             return shape
@@ -120,6 +124,33 @@ class BendTransform:
             center = FreeCAD.Vector(*axis_origin)
             axis = FreeCAD.Vector(*BendTransform._normalize(axis_direction))
 
+            if moving_panels and panel_graph and hasattr(Part, 'Compound'):
+                # Extract faces based on topological graph to avoid rotating fixed geometry
+                fixed_faces = []
+                moving_faces = []
+
+                all_faces = shape.Faces
+                
+                # We need to map faces to their panels
+                # If a face belongs to a moving panel, we rotate it.
+                # If it belongs to a fixed panel, we copy it directly.
+                moving_indices = set()
+                for p_id in moving_panels:
+                    if p_id in panel_graph.panels:
+                        for idx in panel_graph.panels[p_id].face_indices:
+                            moving_indices.add(idx)
+                            
+                for i, face in enumerate(all_faces):
+                    if i in moving_indices:
+                        f_copy = face.copy()
+                        f_copy.rotate(center, axis, signed_angle_deg)
+                        moving_faces.append(f_copy)
+                    else:
+                        fixed_faces.append(face.copy())
+                        
+                return Part.Compound(fixed_faces + moving_faces)
+
+            # Fallback: rotate entire shape
             shape_copy = shape.copy()
             shape_copy.rotate(center, axis, signed_angle_deg)
             return shape_copy

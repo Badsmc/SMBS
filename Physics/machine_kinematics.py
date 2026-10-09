@@ -19,6 +19,42 @@ except ImportError:
     HAS_FREECAD = False
 
 
+def _load_shape_from_fcstd(filepath: str) -> Any:
+    if not HAS_FREECAD: return None
+    import os
+    if not os.path.exists(filepath):
+        import FreeCAD
+        FreeCAD.Console.PrintError(f"BendSeq: File not found {filepath}\n")
+        return None
+    
+    try:
+        import FreeCAD
+        # Use openDocument to ensure it works in GUI mode
+        doc = FreeCAD.openDocument(filepath)
+        if doc is None:
+            FreeCAD.Console.PrintError(f"BendSeq: Failed to open {filepath}\n")
+            return None
+            
+        shapes = [obj.Shape for obj in doc.Objects if hasattr(obj, 'Shape') and not obj.Shape.isNull()]
+        solids = [s for s in shapes if hasattr(s, 'Volume') and s.Volume > 0]
+        
+        if not solids:
+            FreeCAD.Console.PrintError(f"BendSeq: No solids found in {filepath}\n")
+            FreeCAD.closeDocument(doc.Name)
+            return None
+            
+        res = solids[0].copy()
+        for s in solids[1:]:
+            res = res.fuse(s.copy())
+            
+        FreeCAD.closeDocument(doc.Name)
+        FreeCAD.Console.PrintMessage(f"BendSeq: Loaded FCStd shape from {filepath}\n")
+        return res
+    except Exception as e:
+        import FreeCAD
+        FreeCAD.Console.PrintError(f"BendSeq: Error loading FCStd {filepath}: {str(e)}\n")
+        return None
+
 class PunchProfile:
     """Represents a press brake punch upper tool."""
 
@@ -30,7 +66,8 @@ class PunchProfile:
         width_mm: float = 30.0,
         length_mm: float = 1000.0,
         tip_radius_mm: float = 1.0,
-        tip_angle_deg: float = 88.0
+        tip_angle_deg: float = 88.0,
+        filepath: Optional[str] = None
     ):
         self.name = name
         self.punch_type = punch_type
@@ -39,11 +76,16 @@ class PunchProfile:
         self.length_mm = length_mm
         self.tip_radius_mm = tip_radius_mm
         self.tip_angle_deg = tip_angle_deg
+        self.filepath = filepath
         self.topo_shape = self._build_topo_shape()
 
     def _build_topo_shape(self) -> Any:
         if not HAS_FREECAD:
             return None
+        if self.filepath:
+            shape = _load_shape_from_fcstd(self.filepath)
+            if shape is not None:
+                return shape
         try:
             # Create Punch blade solid positioned at Top Dead Center (TDC) open daylight height (150mm above die)
             punch_box = Part.makeBox(self.width_mm, self.length_mm, self.height_mm)
@@ -64,7 +106,8 @@ class DieProfile:
         width_mm: float = 50.0,
         length_mm: float = 1000.0,
         v_angle_deg: float = 88.0,
-        shoulder_radius_mm: float = 1.5
+        shoulder_radius_mm: float = 1.5,
+        filepath: Optional[str] = None
     ):
         self.name = name
         self.v_width_mm = v_width_mm
@@ -73,11 +116,16 @@ class DieProfile:
         self.length_mm = length_mm
         self.v_angle_deg = v_angle_deg
         self.shoulder_radius_mm = shoulder_radius_mm
+        self.filepath = filepath
         self.topo_shape = self._build_topo_shape()
 
     def _build_topo_shape(self) -> Any:
         if not HAS_FREECAD:
             return None
+        if self.filepath:
+            shape = _load_shape_from_fcstd(self.filepath)
+            if shape is not None:
+                return shape
         try:
             # Create V-die block solid (top resting face at Z = 0)
             die_box = Part.makeBox(self.width_mm, self.length_mm, self.height_mm)
@@ -100,7 +148,8 @@ class PressBrakeMachine:
         backgauge_x_max_mm: float = 800.0,
         backgauge_r_max_mm: float = 250.0,
         punch: Optional[PunchProfile] = None,
-        die: Optional[DieProfile] = None
+        die: Optional[DieProfile] = None,
+        machine_shape: Optional[Any] = None
     ):
         self.name = name
         self.max_tonnage = max_tonnage
@@ -109,10 +158,33 @@ class PressBrakeMachine:
         self.backgauge_r_max_mm = backgauge_r_max_mm
         self.punch = punch or PunchProfile()
         self.die = die or DieProfile()
+        self.machine_shape = machine_shape
 
     @classmethod
     def default_setup(cls) -> 'PressBrakeMachine':
-        return cls()
+        import os
+        import glob
+        # Use abspath so we stay in FreeCAD's Mod folder
+        current_file = os.path.abspath(__file__)
+        # current_file is .../Mod/BendSeq/Physics/machine_kinematics.py
+        base_dir = os.path.dirname(os.path.dirname(current_file))
+        # base_dir is .../Mod/BendSeq
+        lib_dir = os.path.join(base_dir, "toollibrary")
+        
+        def get_first_fcstd(subfolder):
+            path = os.path.join(lib_dir, subfolder, "*.FCStd")
+            files = glob.glob(path)
+            return files[0] if files else None
+            
+        punch_path = get_first_fcstd("punch")
+        die_path = get_first_fcstd("die")
+        machine_path = get_first_fcstd("presses")
+        
+        punch = PunchProfile(filepath=punch_path)
+        die = DieProfile(filepath=die_path)
+        machine_shape = _load_shape_from_fcstd(machine_path) if machine_path else None
+        
+        return cls(punch=punch, die=die, machine_shape=machine_shape)
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> 'PressBrakeMachine':

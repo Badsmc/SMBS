@@ -111,9 +111,12 @@ class FeatureExtractor:
         return 2.0
 
     def _detect_bends(self, shape: Any, thickness: float) -> Dict[str, Dict[str, Any]]:
-        """Find cylindrical surfaces corresponding to sheet metal bends."""
+        """Find cylindrical surfaces corresponding to sheet metal bends and deduplicate inner/outer faces."""
         bends = {}
         bend_counter = 1
+        
+        # Keep track of detected bends to avoid double-counting inner/outer faces
+        detected_centers = []
 
         if hasattr(shape, 'Faces'):
             for face_idx, face in enumerate(shape.Faces):
@@ -130,14 +133,42 @@ class FeatureExtractor:
                         
                         axis_dir = (cyl.Axis.x, cyl.Axis.y, cyl.Axis.z) if hasattr(cyl, 'Axis') else (0, 0, 1)
                         center_loc = (cyl.Center.x, cyl.Center.y, cyl.Center.z) if hasattr(cyl, 'Center') else (0, 0, 0)
+                        
+                        # Deduplication: check if we already extracted a bend at this center
+                        is_duplicate = False
+                        for cx, cy, cz in detected_centers:
+                            dist = math.sqrt((cx - center_loc[0])**2 + (cy - center_loc[1])**2 + (cz - center_loc[2])**2)
+                            if dist < thickness * 2.0:
+                                is_duplicate = True
+                                break
+                        
+                        if is_duplicate:
+                            continue
+                            
+                        detected_centers.append(center_loc)
+
                         bend_length = round(face.BoundBox.ZLength, 2) if face.BoundBox.ZLength > 1.0 else 100.0
 
                         # Panel adjacency ids
                         parent_panel_id = f"PANEL_{(bend_counter - 1):02d}"
                         child_panel_id = f"PANEL_{bend_counter:02d}"
 
-                        # Calculate geometric signed angle from normals if available
+                        # Calculate exact geometric signed angle from cylindrical surface bounds or normals
                         signed_angle = 90.0
+                        if hasattr(face, 'ParameterRange'):
+                            try:
+                                u_min, u_max, _, _ = face.ParameterRange
+                                span_deg = math.degrees(abs(u_max - u_min))
+                                if 5.0 <= span_deg <= 175.0:
+                                    signed_angle = round(span_deg, 1)
+                            except Exception:
+                                pass
+                        
+                        # Determine sign (+ / -) based on surface curvature orientation
+                        bend_sign = 1
+                        if hasattr(face, 'Orientation') and face.Orientation == 'Reversed':
+                            bend_sign = -1
+                            signed_angle = -signed_angle
 
                         bend_id = f"BEND_{bend_counter:02d}"
                         bend_rec = BendRecord(
@@ -150,6 +181,7 @@ class FeatureExtractor:
                             signed_angle=signed_angle,
                             radius=inner_radius,
                             thickness=thickness,
+                            bend_sign=bend_sign,
                             length=bend_length
                         )
                         bends[bend_id] = bend_rec.to_dict()

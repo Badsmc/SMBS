@@ -21,8 +21,20 @@ class BendSeqWorkbench (FreeCADGui.Workbench):
     def Initialize(self):
         """Initialize workbench commands, toolbars and menus."""
         import BendSeqWorkbench
-        self.appendToolbar("BendSeq Tools", ["BendSeq_RunPlanner", "BendSeq_ShowKinematics"])
-        self.appendMenu("BendSeq", ["BendSeq_RunPlanner", "BendSeq_ShowKinematics"])
+        self.appendToolbar("BendSeq Tools", [
+            "BendSeq_RunPlanner", 
+            "BendSeq_ShowKinematics",
+            "BendSeq_ImportPunch",
+            "BendSeq_ImportDie",
+            "BendSeq_ImportPress"
+        ])
+        self.appendMenu("BendSeq", [
+            "BendSeq_RunPlanner", 
+            "BendSeq_ShowKinematics",
+            "BendSeq_ImportPunch",
+            "BendSeq_ImportDie",
+            "BendSeq_ImportPress"
+        ])
 
     def GetClassName(self):
         return "Gui::PythonWorkbench"

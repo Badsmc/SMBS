@@ -146,10 +146,8 @@ class BendSeqOrchestrator:
                 "cache_stats": self.state_cache.stats
             }
 
-        goal_state = planning_result["goal_state"]
-
         # Step 4: Invert backward solution trajectory (Flat -> Step 1 -> Step 2 -> Fully Bent)
-        forward_sequence = goal_state.reconstruct_forward_sequence()
+        forward_sequence = planning_result.get("sequence", [])
 
         # Step 5: Post-Pass Hybrid Strategy — Calculate precise Backgauge (X, R, Z1, Z2) positions
         # and optimize tool segment allocations for each step in forward order.
@@ -171,10 +169,12 @@ class BendSeqOrchestrator:
             step_entry = {
                 "step": step["step_number"],
                 "bend_id": bend_id,
-                "angle_deg": step.get("angle", 90.0),
-                "radius_mm": step.get("radius", 1.0),
-                "length_mm": step.get("length", 100.0),
-                "axis": step.get("axis", (0, 0, 1)),
+                "angle_deg": step.get("angle", bend_info.get("angle", 90.0)),
+                "radius_mm": step.get("radius", bend_info.get("radius", 1.0)),
+                "length_mm": step.get("length", bend_info.get("length", 100.0)),
+                "axis": step.get("axis", bend_info.get("axis", (0, 0, 1))),
+                "origin": step.get("origin", bend_info.get("origin", (0, 0, 0))),
+                "moving_panels": step.get("moving_panels", []),
                 "backgauge": bg_data,
                 "tooling": tooling
             }
